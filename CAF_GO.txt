@@ -1,0 +1,83 @@
+path = c('iCAF/', 'matrix CAF/', 'myCAF/', 'progenitor CAF/')
+type = c('iCAF', 'matrix CAF', 'myCAF', 'progenitor CAF')
+
+for (i in 1:length(path)) {
+  setwd(path[i])
+  
+  DEG=FindMarkers(scRNA_CAF,ident.1 = type[i],
+                  ident.2 = type[-i],
+                  group.by = "CAF_subtype_temp")
+  
+  DEG$SYMBOL = rownames(DEG)
+  data = DEG
+  write.table(DEG, 'all.txt', sep='\t', quote=F)
+  
+  data=read.delim('all.txt', header=T)
+  attach(data)
+  
+  p=0.05  
+  log2FC = log2(1.5)  
+  
+  include = rep(NA, length=length(SYMBOL))
+  TF = (avg_log2FC)>log2FC & p_val<p
+  for (i in 1:length(SYMBOL)) {
+    if (TF[i] == TRUE) {include[i] = 1}
+    else {include[i]=0}
+  }
+  
+  symbol=cbind(data[which(include==1), ])
+  
+  write.table(symbol, file='symbol.txt', sep="\t",quote=F,row.names=F)
+  
+  detach(data)
+  
+  library("org.Hs.eg.db")  
+  rt=read.table("symbol.txt",sep="\t",check.names=F,header=T)
+  genes=as.vector(rt[,'SYMBOL'])
+  entrezIDs <- mget(genes, org.Hs.egSYMBOL2EG, ifnotfound=NA)   
+  entrezIDs <- as.character(entrezIDs)
+  out=cbind(rt,entrezID=entrezIDs)
+  write.table(out,file="id.txt",sep="\t",quote=F,row.names=F) 
+  
+  library("clusterProfiler")
+  library("org.Hs.eg.db")
+  library("enrichplot")
+  library("ggplot2")
+  
+  rt=read.table("id.txt",sep="\t",header=T,check.names=F)           
+  rt=rt[is.na(rt[,"entrezID"])==F,]                                
+  gene=rt$entrezID
+  
+  # GO enrichment
+  kk <- enrichGO(gene = gene,
+                 OrgDb = org.Hs.eg.db, 
+                 pvalueCutoff =0.2, 
+                 qvalueCutoff = 0.2,
+                 ont="all",
+                 readable =T)
+  write.table(kk,file="GO.txt",sep="\t",quote=F,row.names = F)     
+  
+  
+  
+  library("clusterProfiler")
+  library("org.Hs.eg.db")
+  library("enrichplot")
+  library("ggplot2")
+  
+  
+  rt=read.table("id.txt",sep="\t",header=T,check.names=F)       
+  rt=rt[is.na(rt[,"entrezID"])==F,]                           
+  gene=rt$entrezID
+  
+  # KEGG enrichment
+  kk <- enrichKEGG(gene = gene, organism = "hsa", pvalueCutoff =0.2, qvalueCutoff =0.2)
+  write.table(kk,file="KEGGId.txt",sep="\t",quote=F,row.names = F)   
+  
+  setwd('..')
+}
+
+
+
+
+
+

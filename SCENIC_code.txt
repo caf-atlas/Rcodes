@@ -1,0 +1,138 @@
+library(dplyr)
+library(Seurat)
+library(tidyverse)
+library(patchwork)
+library(SCENIC)
+library(AUCell)
+library(harmony)
+
+
+celltype = data.frame(ClusterID=scRNA_CAF@meta.data$seurat_clusters, celltype=scRNA_CAF@meta.data$CAF_subtype_temp, stringsAsFactors = FALSE)
+scRNA_CAF@meta.data$celltype = "NA"
+for(i in 1:nrow(celltype)){
+  scRNA_CAF@meta.data[which(scRNA_CAF@meta.data$seurat_clusters == celltype$ClusterID[i]),'celltype'] <- celltype$celltype[i]}
+
+cellInfo <- data.frame(scRNA_CAF@meta.data)
+colnames(cellInfo)[which(colnames(cellInfo)=="orig.ident")] <- "sample"
+colnames(cellInfo)[which(colnames(cellInfo)=="seurat_clusters")] <- "cluster"
+colnames(cellInfo)[which(colnames(cellInfo)=="CAF_subtype_temp")] <- "celltype"
+cellInfo <- cellInfo[,c("sample","cluster","celltype")]
+saveRDS(cellInfo, file="int/cellInfo.Rds")
+
+colVars <- list(celltype=c("myCAF" = "#00BFC4", 
+                           "matrix CAF" = "#C77CFF", 
+                           "progenitor CAF" = "#F8766D", 
+                           "iCAF" = "#7CAE00"))
+
+exprMat <- as.matrix(scRNA_CAF@assays$RNA@counts)
+
+mydbDIR <- "D:/OneDrive - stu.gzucm.edu.cn/CAF/SCENIC/BRCA"  # change directory
+mydbs <- c( "hg38__refseq-r80__10kb_up_and_down_tss.mc9nr.feather","hg38__refseq-r80__500bp_up_and_100bp_down_tss.mc9nr.feather")
+names(mydbs) <- c("10kb","500bp")
+
+scenicOptions <- initializeScenic(org="hgnc", 
+                                  nCores=1,
+                                  dbDir=mydbDIR, 
+                                  dbs = mydbs,
+                                  datasetTitle = "os")
+saveRDS(scenicOptions, "int/scenicOptions.rds")
+
+
+
+genesKept <- geneFiltering(exprMat, scenicOptions, 
+                           minCountsPerGene = 3 * 0.01 * ncol(exprMat), 
+                           minSamples = ncol(exprMat) * 0.01)
+exprMat_filtered <- exprMat[genesKept, ]
+runCorrelation(exprMat_filtered, scenicOptions)
+exprMat_filtered_log <- log2(exprMat_filtered+1)
+
+runGenie3(exprMat_filtered_log, scenicOptions, nParts = 20)
+
+scenicOptions@settings$verbose <- TRUE
+scenicOptions@settings$nCores <- 1
+scenicOptions@settings$seed <- 123
+
+scenicOptions <- runSCENIC_1_coexNetwork2modules(scenicOptions) 
+scenicOptions <- runSCENIC_2_createRegulons(scenicOptions) 
+
+library(foreach)
+exprMat_all <- as.matrix(scRNA_CAF@assays$RNA@counts)
+exprMat_all <- log2(exprMat_all+1)
+
+runSCENIC_3_scoreCells(scenicOptions, exprMat=exprMat_all)
+
+
+runSCENIC_4_aucell_binarize(scenicOptions, exprMat=exprMat_all) 
+
+nPcs <- c(5)
+
+fileNames <- tsneAUC(scenicOptions, aucType="AUC", nPcs=nPcs, perpl=c(5,15,50))
+
+
+fileNames <- tsneAUC(scenicOptions, aucType="AUC", nPcs=nPcs, perpl=c(5,15,50))
+fileNames <- tsneAUC(scenicOptions, aucType="AUC", nPcs=nPcs, perpl=c(5,15,50), onlyHighConf=TRUE, filePrefix="int/tSNE_oHC")
+fileNames <- paste0("int/",grep(".Rds", grep("tSNE_", list.files("int"), value=T), value=T))
+
+par(mfrow=c(length(nPcs), 3))
+fileNames <- paste0("int/",grep(".Rds", grep("tSNE_AUC", list.files("int"), value=T, perl = T), value=T))
+plotTsne_compareSettings(fileNames, scenicOptions, showLegend=T, varName="celltype",   cex=.5)
+
+tSNE_scenic <- readRDS(tsneFileName(scenicOptions))
+aucell_regulonAUC <- loadInt(scenicOptions, "aucell_regulonAUC")
+
+
+scenicOptions = readRDS('int/scenicOptions.rds')
+cellInfo = readRDS('int/cellInfo.Rds')
+regulonAUC <- loadInt(scenicOptions, "aucell_regulonAUC")
+regulonAUC <- regulonAUC[onlyNonDuplicatedExtended(rownames(regulonAUC)),]
+regulonActivity_byCellType <- sapply(split(rownames(cellInfo), cellInfo$celltype),
+                                     function(cells) rowMeans(getAUC(regulonAUC)[,cells]))
+regulonActivity_byCellType_Scaled <- t(scale(t(regulonActivity_byCellType), center = T, scale=T))
+
+top_TF_selected = 20
+id = rep(NA, 4*top_TF_selected) 
+for (i in 1:4) {
+  regulonActivity_byCellType_Scaled_use = regulonActivity_byCellType_Scaled[
+    order(regulonActivity_byCellType_Scaled[,i], decreasing = T),]
+  top_TF = rownames(regulonActivity_byCellType_Scaled_use)[1:top_TF_selected]
+  top_TF_pos = rep(NA, top_TF_selected)
+  for (j in 1:top_TF_selected) {
+    top_TF_pos[j] = which(rownames(regulonActivity_byCellType_Scaled)==top_TF[j])
+  }
+  id_pos = (top_TF_selected*(i-1)+1):(top_TF_selected*i)
+  id[id_pos] = top_TF_pos
+}
+
+
+ComplexHeatmap::Heatmap(regulonActivity_byCellType_Scaled[id,], name="Regulon activity",
+                        cluster_rows = F, cluster_columns = F, 
+                        col = c('#3C5488','grey','#E64B35'))
+
+
+
+TF_venn = array(NA, dim = c(top_TF_selected, 4))
+colnames(TF_venn) = c('proCAF','iCAF','myCAF','matCAF')
+for (i in 1:4) {
+  TF_selected = rownames(regulonActivity_byCellType_Scaled)[id][(1+top_TF_selected*(i-1)):(top_TF_selected*i)]
+  for (j in 1:top_TF_selected) {
+    TF_venn[j,i] = strsplit(strsplit(TF_selected[j], ' ')[[1]][1], '_')[[1]][1]
+  }
+}
+write.table(TF_venn, 'top 100 TF_LUAD.txt', sep='\t', quote = F, row.names = F)
+
+
+
+scenicOptions = readRDS('int/scenicOptions.rds')
+cellInfo = readRDS('int/cellInfo.Rds')
+tSNE_scenic <- readRDS(tsneFileName(scenicOptions))
+aucell_regulonAUC <- loadInt(scenicOptions, "aucell_regulonAUC")
+colVars = readRDS('int/colVars.Rds')
+
+plotTsne_compareSettings(fileNames, scenicOptions, showLegend=T, 
+                         varName="celltype", cex=.5) 
+
+
+AUCell::AUCell_plotTSNE(tSNE_scenic$Y, exprMat, 
+                        aucell_regulonAUC[onlyNonDuplicatedExtended(rownames(aucell_regulonAUC))[TF[i]],], plots='BinaryAUC')
+
+

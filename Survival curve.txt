@@ -1,0 +1,96 @@
+library(dplyr)
+library(survivalROC) 
+library(ggplot2)
+library(scales)
+library(ggsci)
+library(patchwork)
+library(ggplot2)
+library(survminer)
+require(survival)
+
+genes = c('CCL2','CXCL12','CXCL2','CXCL14','IGF1','OGN','C7','MYH11','ACTA2','RGS5','COL10A1','CTHRC1','POSTN')
+
+n = length(genes)
+
+clinical = read.delim('clinical.txt', sep='\t', check.names = F)
+rownames(clinical) = clinical[,1]
+clinical = clinical[,-1]
+
+RNA = read.delim('RNA level.txt', sep='\t', check.names = F)
+RNA[RNA[,1]=='',]=NA
+RNA = RNA[is.na(RNA[,1])==F,]
+RNA = RNA[which(duplicated(RNA[,1])==F),]
+rownames(RNA) = RNA[,1]
+RNA = RNA[,-c(1,2)]
+RNA = RNA[genes,]
+colnames(RNA) = substr(colnames(RNA), 1, 12)
+
+names = intersect(rownames(clinical), colnames(RNA))
+clinical = clinical[names,]
+RNA = RNA[,names]
+
+
+
+
+
+for (i in 1:n) {
+  gene_use = genes[i]
+  
+  survival_pre = array(NA, dim = c(ncol(RNA), 3), dimnames = list(colnames(RNA), c('RNA_level', 'OS_Months', 'OS_Number')))
+  survival_pre[, 1] = as.numeric(RNA[gene_use, ])
+  survival_pre[, 2] = clinical$OS_MONTHS
+  survival_pre[, 3] = clinical$OS_Number
+  survival_pre = as.data.frame(survival_pre)
+  
+  survival_pre$OS_Months[survival_pre$OS_Months=='[Not Available]'] = NA  
+  survival_pre = survival_pre[complete.cases(survival_pre),] 
+  survival_pre = arrange(survival_pre, RNA_level) 
+  
+  surv_result = surv_cutpoint(data = survival_pre,
+                              time = 'OS_Months',
+                              event = 'OS_Number',
+                              variables = 'RNA_level',
+                              minprop = 0.2)
+  cut.op = as.numeric(surv_result$cutpoint[1])
+  pos = which(survival_pre[,'RNA_level']==cut.op)
+  #pos = 8
+  
+  
+  survival_final = array(NA, dim = c(nrow(survival_pre), 3))
+  colnames(survival_final) = c('OS_Month', 'Low', 'High')
+  survival_final[, 1] = survival_pre$OS_Months
+  survival_final[1:pos, 2] = survival_pre$OS_Number[1:pos]
+  survival_final[(pos+1):nrow(survival_pre), 3] = survival_pre$OS_Number[(pos+1):nrow(survival_pre)]
+  
+  #write.table(survival_final, 'intestinal_survival.txt', sep='\t', row.names = F)
+  
+  # Plot the survival curve
+  surv_cat = surv_categorize(surv_result)
+  
+  fit = survfit(Surv(as.numeric(OS_Months), as.numeric(OS_Number)) ~ RNA_level, 
+                data = surv_cat)
+  
+  high = sum(surv_cat$RNA_level=='high')
+  low = sum(surv_cat$RNA_level=='low')
+  ggsurvplot(
+    fit, 
+    data = surv_cat, 
+    size = 0.5,
+    censor = T,         
+    pval = TRUE, 
+    legend.labs = c(paste0("High expression (n = ", high, ')'), 
+                    paste0("Low expression (n = ", low, ')')), 
+    ggtheme = theme_classic(),
+    palette = c('#FF00FF','#035E03')
+  )
+  
+  ggsave(paste0('survival curve_', gene_use, '.pdf'), width = 5, height = 3.5)
+  
+  
+}
+
+
+model.colon <- coxph(Surv(time = OS_Days, event = OS_Number) ~ IGF2R_IGF2,
+                     data = survival_data)
+model.colon
+ggforest(model.colon)

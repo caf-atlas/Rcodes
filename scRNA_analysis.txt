@@ -1,0 +1,139 @@
+Sys.setenv(LANGUAGE = "en")
+options(stringsAsFactors = FALSE)
+rm(list=ls())
+
+########### Install packages if needed ######################
+if(!requireNamespace("BiocManager",quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("GEOquery")
+
+library(devtools)
+install_github("authorName/repositoryName")
+
+devtools::install_github("tidyverse/ggplot2")
+
+install.packages('r1emotes')
+remotes::install_version("Seurat", version = "3.2.0")
+
+install.packages('Seurat')
+
+##############################################################
+
+setwd("C:\\Users\\Brian Chan\\Google Drive\\R_learning\\Brian Chan\\scRNA analysis\\BC21")
+
+library(Seurat)
+library(tidyverse)
+library(dplyr)
+library(patchwork)
+library(ggplot2)
+
+rm(list=ls())
+
+
+scRNA.counts=Read10X("C:\\Users\\Brian Chan\\Google Drive\\R_learning\\Brian Chan\\scRNA analysis\\BC21") 
+class(scRNA.counts)
+
+
+?CreateSeuratObject
+scRNA = CreateSeuratObject(scRNA.counts, min.cells = 3,project="os", min.features = 300) 
+
+scRNA[["percent.mt"]] <- PercentageFeatureSet(scRNA, pattern = "^MT-")  
+
+HB.genes <- c("HBA1","HBA2","HBB","HBD","HBE1","HBG1","HBG2","HBM","HBQ1","HBZ")  
+HB_m <- match(HB.genes, rownames(scRNA@assays$RNA)) 
+HB.genes <- rownames(scRNA@assays$RNA)[HB_m] 
+HB.genes <- HB.genes[!is.na(HB.genes)]   
+scRNA[["percent.HB"]]<-PercentageFeatureSet(scRNA, features=HB.genes)  
+col.num <- length(levels(scRNA@active.ident))  
+
+violin <- VlnPlot(scRNA,
+                  features = c("nFeature_RNA", "nCount_RNA", "percent.mt","percent.HB"), 
+                  cols =rainbow(col.num), 
+                  pt.size = 0.01,  
+                  ncol = 4) + 
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank())
+
+
+ggsave("vlnplot_before_qc.pdf", plot = violin, width = 12, height = 6) 
+ggsave("vlnplot_before_qc.png", plot = violin, width = 12, height = 6)  
+
+plot1=FeatureScatter(scRNA, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2=FeatureScatter(scRNA, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot3=FeatureScatter(scRNA, feature1 = "nCount_RNA", feature2 = "percent.HB")
+pearplot <- CombinePlots(plots = list(plot1, plot2, plot3), nrow=1, legend="none") 
+
+
+
+
+scRNA1 <- subset(scRNA, subset = nFeature_RNA > 300& nFeature_RNA < 7000 & percent.mt < 10 & percent.HB < 3 & nCount_RNA < 100000)
+scRNA1 <- NormalizeData(scRNA1, normalization.method = "LogNormalize", scale.factor = 10000)
+save(scRNA1,file='scRNA1.Rdata')
+
+
+library(Seurat)
+library(tidyverse)
+library(patchwork)
+library(dplyr)
+scRNA <-load("scRNA1.Rdata")
+
+scRNA1 <- FindVariableFeatures(scRNA1, selection.method = "vst", nfeatures = 3000)  
+
+top10 <- head(VariableFeatures(scRNA1), 10) 
+  
+plot1 <- VariableFeaturePlot(scRNA1) 
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE, size=2.5) 
+plot <- CombinePlots(plots = list(plot1, plot2),legend="bottom") 
+
+
+scale.genes <-  rownames(scRNA1)
+scRNA1 <- ScaleData(scRNA1, features = scale.genes)
+
+g2m_genes = cc.genes$g2m.genes
+g2m_genes = CaseMatch(search = g2m_genes, match = rownames(scRNA1))
+s_genes = cc.genes$s.genes
+s_genes = CaseMatch(search = s_genes, match = rownames(scRNA1))
+scRNA1 <- CellCycleScoring(object=scRNA1,  g2m.features=g2m_genes,  s.features=s_genes)  
+scRNAa <- RunPCA(scRNA1, features = c(s_genes, g2m_genes), seed.use = 123456)  
+p <- DimPlot(scRNAa, reduction = "pca", group.by = "Phase")  
+
+VlnPlot(scRNAa, features = c("nFeature_RNA", "nCount_RNA", "percent.mt","percent.HB","G2M.Score","S.Score"), ncol = 6)
+ggsave("cellcycle_pca_STK3_5846_n.pdf", p, width = 8, height = 6)
+
+scRNA1 <- RunPCA(scRNA1, features = VariableFeatures(scRNA1), seed.use = 123456) 
+plot1 <- DimPlot(scRNA1, reduction = "pca", group.by="orig.ident") 
+
+
+plot2 <- ElbowPlot(scRNA1, ndims=20, reduction="pca")  
+plotc <- plot1+plot2
+ggsave("pca_STK3_5846_n.pdf", plot = plotc, width = 8, height = 4) 
+ggsave("pca.png", plot = plotc, width = 8, height = 4)
+
+pc.num=1:10  
+
+scRNA1 <- FindNeighbors(scRNA1, dims = pc.num) 
+scRNA1 <- FindClusters(scRNA1, resolution = 0.5)  
+scRNA1 = RunTSNE(scRNA1, dims = pc.num, seed.use = 123456)  
+embed_tsne <- Embeddings(scRNA1, 'tsne')
+write.csv(embed_tsne,'embed_tsne.csv')
+plot1 = DimPlot(scRNA1, reduction = "tsne", label = T) 
+
+
+scRNA1 <- RunUMAP(scRNA1, dims = pc.num, seed.use = 123456) 
+embed_umap <- Embeddings(scRNA1, 'umap')
+write.csv(embed_umap,'embed_umap.csv') 
+plot2 = DimPlot(scRNA1, reduction = "umap", label = T) 
+
+saveRDS(scRNA1, file="scRNA1.rds")
+
+
+diff.wilcox = FindAllMarkers(scRNA1)
+all.markers = diff.wilcox %>% select(gene, everything()) %>% subset(p_val<0.05)
+top10 = all.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_log2FC)
+write.csv(all.markers, "diff_genes_wilcox.csv", row.names = F)  
+write.csv(top10, "top10_diff_genes_wilcox.csv", row.names = F)  
+install.packages("ggsave")
+top10_genes = CaseMatch(search = as.vector(top10$gene), match = rownames(scRNA1)) 
+plot1 = DoHeatmap(scRNA1, features = top10_genes, group.by = "seurat_clusters", group.bar = T, size = 4)
+
+ggsave("top10_markers.pdf", plot=plot1, width=8, height=6) 
+

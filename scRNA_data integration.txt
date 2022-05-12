@@ -1,0 +1,81 @@
+library(cowplot)
+library(dplyr)
+library(reshape2)
+library(patchwork)
+library(Seurat)
+?Seurat
+help(package="Seurat")
+Sys.setenv(LANGUAGE = "en")
+options(stringsAsFactors = FALSE)
+rm(list=ls())
+setwd("C:\\Users\\Brian Chan\\Google Drive\\R_learning\\Brian Chan\\scRNA analysis")
+x=list.files()
+
+
+count1=read.table(gzfile("GSM3954946_processed_NAG1.txt.gz"),sep="\t")
+count2=read.table(gzfile("GSM3954952_processed_IMW1.txt.gz"),sep="\t")
+
+scRNAa = CreateSeuratObject(count1,min.cells = 3, min.features = 300, project='sample1')
+scRNAb = CreateSeuratObject(count2,min.cells = 3, min.features = 300, project='sample2')
+scRNA1 = merge(scRNAa, y = scRNAb, add.cell.ids = c("s1", "s2"), project = "merged")
+
+scRNAlist = list(scRNAa, scRNAb)
+
+dir = c('5866n1/',  '5866n2/', '5866t1/', '5866t2/')
+names(dir) = c('5866n1',  '5866n2', '5866t1', '5866t2')      
+
+counts <- Read10X(data.dir =dir)
+scRNA1 = CreateSeuratObject(counts,min.cells = 3, min.features = 200)
+table(scRNA1@meta.data$orig.ident)
+dir[1]
+
+scRNAlist <- list()
+
+for(i in 1:length(dir)){
+  counts <- Read10X(data.dir = dir[i])
+  scRNAlist[[i]] <- CreateSeuratObject(counts, min.cells = 3, min.features =300)
+}
+
+save(scRNAlist,file = "scRNAlist.Rdata")
+load("F:/gl/huada/scRNAlist.Rdata")
+
+##########
+
+for (i in 1:length(scRNAlist)) {
+  scRNAlist[[i]] <- NormalizeData(scRNAlist[[i]])
+  scRNAlist[[i]] <- FindVariableFeatures(scRNAlist[[i]], selection.method = "vst",nfeatures = 3000)
+}
+
+
+library(future)
+plan("multiprocess", workers = 2)
+options(future.globals.maxSize = 3100 * 1024^2)
+?FindIntegrationAnchors
+scRNA.anchors <- FindIntegrationAnchors(object.list = scRNAlist,anchor.features = 2000)  # if cell number is large enough, anchor.features = 3000 is better
+
+scRNA1 <- IntegrateData(anchorset = scRNA.anchors)
+
+save(scRNA1,file = "IntegrateData.Rdata")
+
+
+DefaultAssay(scRNA1) <- "integrated"
+
+scRNA1=ScaleData(scRNA1)
+
+scRNA1 <- RunPCA(scRNA1, npcs = 30, verbose = T)
+
+scRNA1 <- FindNeighbors(scRNA1, reduction = "pca", dims = 1:20)
+scRNA1 <- FindClusters(scRNA1, resolution = 0.8)
+scRNA1 <- RunUMAP(scRNA1, reduction = "pca", dims = 1:20)
+colnames(scRNA1@meta.data)
+scRNA1 <- RunTSNE(scRNA1, dims = 1:20)
+colnames(scRNA1@meta.data)
+DimPlot(scRNA1, reduction = "umap", group.by = "orig.ident")
+ggsave('plot.pdf', plot=t, width=10, height=5)
+DimPlot(scRNA1, reduction = "umap", label = TRUE)
+
+#############################################################################
+DefaultAssay(scRNA1) <- "RNA"
+scRNA <- ScaleData(scRNA1)
+save(scRNA,file = "Integrated_Data.Rdata")
+save(scRNA1, file = 'Integrated_Data_Unscaled.Rdata')

@@ -1,0 +1,37 @@
+library(AUCell)
+data=scRNA_CAF
+cells_rankings <- AUCell_buildRankings(scRNA_CAF@assays$RNA@data,, nCores=6, plotStats=TRUE) 
+c2 <- read.gmt("genesets_immune response.gmt") 
+geneSets <- lapply(unique(c2$term), function(x){print(x);c2$gene[c2$term == x]})
+names(geneSets) <- unique(c2$term)
+
+cells_AUC <- AUCell_calcAUC(geneSets, cells_rankings,nCores = 1, aucMaxRank=nrow(cells_rankings)*0.1)
+
+cells_AUC@NAMES
+
+geneSet <- "KEGG_GAP_JUNCTION"
+aucs <- as.numeric(getAUC(cells_AUC)[geneSet, ])
+data$AUC <- aucs
+df<- data.frame(data@meta.data, data@reductions$umap@cell.embeddings)
+data@meta.data$seurat_clusters
+class_avg <- df %>%
+  group_by( seurat_clusters) %>%
+  summarise(
+    UMAP_1 = median(UMAP_1),
+    UMAP_2 = median(UMAP_2)
+  )
+
+ggplot(df, aes(UMAP_1, UMAP_2))  +
+  geom_point(aes(colour  = AUC)) + viridis::scale_color_viridis(option="E") +
+  ggrepel::geom_label_repel(aes(label = seurat_clusters),
+                            data = class_avg,
+                            size = 5,
+                            label.size = 1,
+                            segment.color = NA
+  )+   theme(legend.position = "none") + theme_bw()
+
+ggplot(df, aes(UMAP_1, UMAP_2))  +
+  geom_point(aes(colour  = AUC), size = 0.1) + 
+  viridis::scale_color_viridis(option="E",limits = c(0, 0.15)) +
+  
+  theme(legend.position = "none") + theme_classic() + ggtitle('Adaptive immune response')

@@ -1,0 +1,32 @@
+library(infercnv)
+library(dplyr)
+pos=read.table('G:/OneDrive - The Chinese University of Hong Kong/Single cell seq data/Gastric cancer_CCR/Gastric_cancer_single_cell_seq/All_data/human.gene.positions')
+
+pos1=distinct(pos,V7,.keep_all = TRUE)
+rownames(pos1)=pos1$V7
+colnames(pos1)
+pos2=pos1[,c(7,2,3,4)]
+write.table(pos2, 'geneLocate.txt', row.names=F, col.names=F, sep='\t')
+
+
+exprMatrix <- as.matrix(GetAssayData(scRNA_CAF, slot='counts'))
+cellAnnota <- subset(scRNA_CAF@meta.data, select='CAF_subtype_temp')
+groupFiles='groupFiles.txt'
+dim(exprMatrix)
+write.table(cellAnnota,file ="groupFiles.txt",sep = '\t',col.names = F)
+
+infercnv_obj = CreateInfercnvObject(raw_counts_matrix=exprMatrix,
+                                        annotations_file="groupFiles.txt",
+                                        delim="\t",
+                                        gene_order_file= "geneLocate.txt",
+                                        ref_group_names=c('NF'))
+
+
+infercnv_obj2 = infercnv::run(infercnv_obj,
+                                 cutoff=0.1, 
+                                 out_dir=  'cnv2/' , 
+                                 cluster_by_groups=T,
+                                 denoise=TRUE,
+                                 HMM=TRUE,
+                                 window_length = 51,
+                                 hclust_method="ward.D2", plot_steps=F,output_format ="pdf") 

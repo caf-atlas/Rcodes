@@ -1,0 +1,84 @@
+library(ggsci)
+library(CellChat)
+
+
+data.input <- GetAssayData(scRNA1, assay = "RNA", slot = "data")
+identity <- subset(scRNA1@meta.data, select = "cell_type_finalized")
+cellchat <- createCellChat(object = data.input, meta = identity,  group.by = "cell_type_finalized")
+
+CellChatDB <- CellChatDB.human
+
+
+CellChatDB.use <- subsetDB(CellChatDB, search = "Secreted Signaling") # use Secreted Signaling
+
+cellchat@DB <- CellChatDB.use
+
+cellchat <- subsetData(cellchat)
+future::plan("multiprocess", workers = 4)
+
+
+cellchat <- identifyOverExpressedGenes(cellchat)
+
+cellchat <- identifyOverExpressedInteractions(cellchat)
+
+cellchat <- projectData(cellchat, PPI.human)
+cellchat@idents = droplevels(cellchat@idents)
+cellchat <- computeCommunProb(cellchat, raw.use = TRUE)
+
+cellchat <- filterCommunication(cellchat, min.cells = 3)
+
+cellchat <- computeCommunProbPathway(cellchat)
+
+cellchat <- aggregateNet(cellchat)
+
+
+cellchat = netAnalysis_computeCentrality(cellchat, slot.name = "netP")
+netAnalysis_signalingRole_heatmap(cellchat, pattern = "outgoing", height = 15, width = 25)
+netAnalysis_signalingRole_heatmap(cellchat, pattern = "incoming")
+
+
+########
+CAF_name = unique(grep('CAF',cellchat@meta[["cell_type_finalized"]], value = T))
+pathway = c('FGF','GAS','IGF','PERIOSTIN','ANGPT','PDGF','CCL')
+
+
+pdf(file = 'NEPC_heatmap_FGF.pdf', width = 10, height = 6)
+netVisual_heatmap(cellchat, signaling = "FGF", color.heatmap = "Reds", sources.use = c(CAF_name))
+dev.off()
+
+pdf(file = 'NEPC_heatmap_GAS.pdf', width = 10, height = 6)
+netVisual_heatmap(cellchat, signaling = "GAS", color.heatmap = "Reds", sources.use = c(CAF_name))
+dev.off()
+
+pdf(file = 'NEPC_heatmap_IGF.pdf', width = 10, height = 6)
+netVisual_heatmap(cellchat, signaling = "IGF", color.heatmap = "Reds", sources.use = c(CAF_name))
+dev.off()
+
+pdf(file = 'NEPC_heatmap_PERIOSTIN.pdf', width = 10, height = 6)
+netVisual_heatmap(cellchat, signaling = "PERIOSTIN", color.heatmap = "Reds", sources.use = c(CAF_name))
+dev.off()
+
+pdf(file = 'NEPC_heatmap_ANGPT.pdf', width = 10, height = 6)
+netVisual_heatmap(cellchat, signaling = "ANGPT", color.heatmap = "Reds", sources.use = c(CAF_name))
+dev.off()
+
+pdf(file = 'NEPC_heatmap_PDGF.pdf', width = 10, height = 6)
+netVisual_heatmap(cellchat, signaling = "PDGF", color.heatmap = "Reds", sources.use = c(CAF_name))
+dev.off()
+
+pdf(file = 'NEPC_heatmap_CCL.pdf', width = 10, height = 6)
+netVisual_heatmap(cellchat, signaling = "CCL", color.heatmap = "Reds", sources.use = c(CAF_name))
+dev.off()
+
+
+
+for (i in 1:7) {
+  pathway_use = pathway[i]
+  
+  pdf(file =paste0('NEPC_circle plot_', pathway_use, '.pdf'), width = 10, height = 10)
+  netVisual_aggregate(cellchat, signaling = pathway_use,layout = "chord",sources.use = CAF_name)
+  dev.off()
+}
+
+netVisual_bubble(cellchat, sources.use = 'iCAF', signaling = c('CCL','CXCL'), remove.isolate = FALSE)
+

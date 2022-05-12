@@ -1,0 +1,24 @@
+library(ggplot2)          
+inputFile= paste0('GO plot_', c('iCAF', 'myCAF', 'matrix CAF', 'proCAF'), '.txt')   
+outFile=paste0('GO plot_', c('iCAF', 'myCAF', 'matrix CAF', 'proCAF'), '_PUAD.pdf')       
+
+for (i in 1:length(inputFile)) {
+  input = inputFile[i]
+  output = outFile[i]
+  
+  rt = read.table(input, header=T, sep="\t", check.names=F)      
+  
+  labels=rt[order(rt$Ratio),"Term"]
+  rt$Term = factor(rt$Term,levels=labels)
+  
+  p = ggplot(rt,aes(Ratio, Term)) + 
+    geom_point(aes(size=Count, color=FDR))
+  p1 = p + 
+    scale_colour_gradient(low="red",high="blue") + 
+    labs(color="FDR",size="Count",x="Gene ratio",y="Term")+
+    theme(axis.text.x=element_text(color="black", size=10),axis.text.y=element_text(color="black", size=10)) + 
+    theme_bw()
+  ggsave(output, width=8, height=5)  
+  
+}
+
